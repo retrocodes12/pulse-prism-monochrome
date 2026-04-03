@@ -1189,8 +1189,13 @@
     try {
       state.auth.error = '';
       updateAuthUI();
-      const account = await ensureAuthAccount();
-      account.createOAuth2Session(provider, getAuthSuccessUrl(), getAuthFailureUrl());
+      const host = getHostWindow();
+      const endpoint = getAuthEndpoint().replace(/\/+$/g, '');
+      const url = new URL(`${endpoint}/account/sessions/oauth2/${provider}`);
+      url.searchParams.set('project', getAuthProject());
+      url.searchParams.set('success', getAuthSuccessUrl());
+      url.searchParams.set('failure', getAuthFailureUrl());
+      host.location.assign(url.toString());
     } catch (error) {
       state.auth.error = error?.message || 'Unable to start OAuth right now.';
       updateAuthUI();
