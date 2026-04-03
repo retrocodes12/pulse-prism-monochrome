@@ -1074,6 +1074,15 @@
     text-overflow: ellipsis;
   }
 
+  .player-source {
+    margin-top: 2px;
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.46);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .player-heart {
     background: none;
     border: none;
@@ -2405,6 +2414,7 @@
       <div class="player-info">
         <div class="player-title" id="player-title">Nocturne Drive</div>
         <div class="player-artist" id="player-artist">Aurora Static</div>
+        <div class="player-source" id="player-source">Playback path unknown</div>
       </div>
       <button class="player-heart" id="player-heart" onclick="event.stopPropagation();toggleLikeCurrent()" data-tip="Like">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>

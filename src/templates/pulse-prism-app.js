@@ -88,6 +88,12 @@
       ready: false,
       error: '',
     },
+    playbackDebug: {
+      source: 'Pending',
+      presentation: '',
+      previewReason: '',
+      note: '',
+    },
     discoverContext: {
       gridTitle: 'Editor picks',
       gridLink: 'Featured albums',
@@ -115,6 +121,7 @@
     authEmail: document.getElementById('auth-email'),
     authPassword: document.getElementById('auth-password'),
     authSignOutBtn: document.getElementById('auth-signout-btn'),
+    playerSource: document.getElementById('player-source'),
   };
 
   const audio = state.audio;
@@ -550,6 +557,24 @@
       .replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
+  function setPlaybackDebug(source, presentation = '', previewReason = '', note = '') {
+    state.playbackDebug = {
+      source: source || 'Unknown',
+      presentation: presentation || '',
+      previewReason: previewReason || '',
+      note: note || '',
+    };
+  }
+
+  function getPlaybackDebugSummary() {
+    const { source, presentation, previewReason, note } = state.playbackDebug;
+    const parts = [source];
+    if (presentation) parts.push(formatQuality(presentation));
+    if (previewReason) parts.push(formatPreviewReason(previewReason));
+    if (note) parts.push(note);
+    return parts.filter(Boolean).join(' · ');
+  }
+
   function buildMood(track) {
     const bpm = Number(track.bpm || 0);
     if (bpm >= 126) return 'Night Run';
@@ -580,6 +605,7 @@
     const sentences = [
       `${formatPresentation(track)} through Monochrome's public bridge.`,
       track.previewReason ? `${formatPreviewReason(track.previewReason)}.` : '',
+      state.playbackDebug?.source ? `Resolved via ${state.playbackDebug.source}.` : '',
       track.releaseYear ? `Released ${track.releaseYear}.` : '',
       track.copyright ? `${track.copyright.replace(/\s+/g, ' ')}.` : '',
     ].filter(Boolean);
@@ -1051,6 +1077,7 @@
   function updatePlayerBar(track) {
     document.getElementById('player-title').textContent = track.title;
     document.getElementById('player-artist').textContent = track.artist;
+    if (dom.playerSource) dom.playerSource.textContent = getPlaybackDebugSummary();
     document.getElementById('player-art').innerHTML = artHTML(track, 52);
     document.getElementById('player-glow').style.background = `radial-gradient(ellipse at left, ${track.colors.accent}, transparent 60%)`;
     document.getElementById('player-heart').classList.toggle('liked', state.likes.has(track.id));
@@ -1065,7 +1092,9 @@
     document.getElementById('expanded-now-title').textContent = track.title;
     document.getElementById('expanded-now-subtitle').textContent = `${track.artist} · ${track.album}`;
     document.getElementById('expanded-blurb').textContent = track.blurb;
-    document.getElementById('expanded-notes').textContent = state.playbackError || track.notes;
+    document.getElementById('expanded-notes').textContent = state.playbackError
+      ? `${state.playbackError} ${getPlaybackDebugSummary()}`
+      : track.notes;
     document.getElementById('expanded-like').classList.toggle('liked', state.likes.has(track.id));
     document.getElementById('expanded-time-total').textContent = audio.duration ? formatDuration(audio.duration) : track.duration;
 
@@ -1445,14 +1474,17 @@
             presentation: attributes.trackPresentation || '',
             previewReason: attributes.previewReason || '',
           };
+          setPlaybackDebug('Direct OpenAPI manifest', directManifest.presentation, directManifest.previewReason);
           state.manifestCache.set(track.id, directManifest);
           return directManifest;
         }
       } else if (directResponse.status === 401) {
         localStorage.removeItem(STORAGE_KEYS.tidalToken);
         localStorage.removeItem(STORAGE_KEYS.tidalTokenExpiry);
+        setPlaybackDebug('Direct OpenAPI manifest', '', '', '401 from TIDAL token flow');
       }
     } catch (error) {
+      setPlaybackDebug('Direct OpenAPI manifest', '', '', error?.message || 'lookup failed');
       console.warn('Direct TIDAL manifest lookup failed, falling back to public bridge', error);
     }
 
@@ -1466,10 +1498,12 @@
           presentation: lookup.info?.assetPresentation || lookup.info?.trackPresentation || '',
           previewReason: lookup.info?.previewReason || '',
         };
+        setPlaybackDebug('/track fallback', fallbackManifest.presentation, fallbackManifest.previewReason);
         state.manifestCache.set(track.id, fallbackManifest);
         return fallbackManifest;
       }
     } catch (error) {
+      setPlaybackDebug('/track fallback', '', '', error?.message || 'lookup failed');
       console.warn('Track lookup fallback failed, trying public preview bridge', error);
     }
 
@@ -1493,6 +1527,7 @@
       presentation: attributes.trackPresentation || '',
       previewReason: attributes.previewReason || '',
     };
+    setPlaybackDebug('Public bridge manifest', manifest.presentation, manifest.previewReason);
     state.manifestCache.set(track.id, manifest);
     return manifest;
   }
@@ -1503,6 +1538,7 @@
 
     const token = ++state.loadToken;
     state.playbackError = '';
+    setPlaybackDebug('Resolving playback path', '', '', '');
     rememberTrack(track.id);
     rebuildLibraryCollection();
 
@@ -1555,6 +1591,7 @@
       console.error('Playback load failed', error);
       if (token !== state.loadToken) return;
       state.playbackError = 'Preview stream unavailable right now.';
+      setPlaybackDebug(state.playbackDebug.source, state.playbackDebug.presentation, state.playbackDebug.previewReason, error?.message || 'player load failed');
       state.isPlaying = false;
       updatePlayPauseIcons();
       applyCurrentTrackToSurface();
