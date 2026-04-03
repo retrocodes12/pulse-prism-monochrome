@@ -1094,8 +1094,11 @@
     const nextIndex = (state.currentQueueIndex + 1) % state.queueTrackIds.length;
     if (nextIndex === 0 && state.repeatMode === 0 && state.currentQueueIndex === state.queueTrackIds.length - 1) {
       audio.pause();
+      audio.currentTime = 0;
       state.isPlaying = false;
       updatePlayPauseIcons();
+      updateProgressUI();
+      syncLyricState(true);
       return;
     }
     await playQueueTrack(nextIndex, true);
@@ -1230,6 +1233,15 @@
 
     const tab = document.getElementById(`tab-${pageId}`);
     if (tab) tab.classList.add('active');
+
+    const scrollArea = document.querySelector('.scroll-area');
+    if (scrollArea) {
+      scrollArea.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    if (dom.searchInput && document.activeElement === dom.searchInput) {
+      dom.searchInput.blur();
+    }
   }
 
   async function loadAlbum(albumId, autoplayFirstTrack = false) {
@@ -1562,6 +1574,7 @@
     dom.searchInput?.addEventListener('input', handleSearchInput);
     dom.searchInput?.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
+        clearTimeout(state.searchTimer);
         const query = dom.searchInput?.value.trim() || '';
         if (query.length >= 2) {
           void performSearch(query);

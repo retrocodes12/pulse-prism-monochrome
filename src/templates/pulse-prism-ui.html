@@ -1532,6 +1532,10 @@
     opacity: 0.94;
   }
 
+  body.player-open {
+    overflow: hidden;
+  }
+
   /* ── Responsive ─────────────────────────────── */
   @media (max-width: 1100px) {
     .app {
@@ -1612,10 +1616,9 @@
       width: 100%;
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 6px;
+      gap: 4px;
       padding: 4px;
-      overflow-x: auto;
-      scrollbar-width: none;
+      overflow: hidden;
     }
 
     .page-tabs::-webkit-scrollbar {
@@ -1623,9 +1626,9 @@
     }
 
     .page-tab {
-      flex: 1 0 auto;
-      min-width: 72px;
-      padding: 9px 10px;
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 9px 8px;
       text-align: center;
       white-space: nowrap;
     }
@@ -1789,14 +1792,14 @@
     }
 
     .page-tabs {
-      gap: 6px;
+      gap: 4px;
       padding: 4px;
     }
 
     .page-tab {
-      min-width: 78px;
-      padding: 8px 14px;
-      font-size: 12.5px;
+      min-width: 0;
+      padding: 8px 6px;
+      font-size: 12px;
     }
 
     .topbar-right {
@@ -2195,7 +2198,7 @@
         <div class="player-title" id="player-title">Nocturne Drive</div>
         <div class="player-artist" id="player-artist">Aurora Static</div>
       </div>
-      <button class="player-heart" id="player-heart" onclick="toggleLikeCurrent()" data-tip="Like">
+      <button class="player-heart" id="player-heart" onclick="event.stopPropagation();toggleLikeCurrent()" data-tip="Like">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
       </button>
     </div>
