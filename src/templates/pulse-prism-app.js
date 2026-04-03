@@ -77,6 +77,13 @@
     searchTimer: null,
     playbackFrame: 0,
     lyricNodes: [],
+    auth: {
+      account: null,
+      user: null,
+      loading: false,
+      ready: false,
+      error: '',
+    },
     discoverContext: {
       gridTitle: 'Editor picks',
       gridLink: 'Featured albums',
@@ -94,6 +101,16 @@
     lyricsKicker: document.getElementById('lyrics-kicker'),
     lyricsTitle: document.getElementById('lyrics-title'),
     lyricsHint: document.getElementById('lyrics-hint'),
+    authTrigger: document.getElementById('auth-trigger'),
+    authModal: document.getElementById('auth-modal'),
+    authAvatar: document.getElementById('auth-avatar'),
+    authLabel: document.getElementById('auth-label'),
+    authSub: document.getElementById('auth-sub'),
+    authStatusCopy: document.getElementById('auth-status-copy'),
+    authConfigNote: document.getElementById('auth-config-note'),
+    authEmail: document.getElementById('auth-email'),
+    authPassword: document.getElementById('auth-password'),
+    authSignOutBtn: document.getElementById('auth-signout-btn'),
   };
 
   const audio = state.audio;
@@ -139,6 +156,70 @@
     saveStoredArray(STORAGE_KEYS.recents, state.recentTrackIds);
     localStorage.setItem(STORAGE_KEYS.volume, String(state.volume));
     localStorage.setItem(STORAGE_KEYS.muted, String(state.isMuted));
+  }
+
+  function getHostWindow() {
+    try {
+      return window.parent && window.parent !== window ? window.parent : window;
+    } catch {
+      return window;
+    }
+  }
+
+  function getAuthEndpoint() {
+    const local = localStorage.getItem('monochrome-appwrite-endpoint');
+    if (local) return local;
+
+    const host = getHostWindow();
+    if (host.__APPWRITE_ENDPOINT__) return host.__APPWRITE_ENDPOINT__;
+
+    const hostname = host.location?.hostname || window.location.hostname;
+    if (hostname.endsWith('monochrome.tf') || hostname === 'monochrome.tf') {
+      return 'https://auth.monochrome.tf/v1';
+    }
+    return 'https://auth.samidy.com/v1';
+  }
+
+  function getAuthProject() {
+    const local = localStorage.getItem('monochrome-appwrite-project');
+    if (local) return local;
+
+    const host = getHostWindow();
+    if (host.__APPWRITE_PROJECT_ID__) return host.__APPWRITE_PROJECT_ID__;
+
+    return 'auth-for-monochrome';
+  }
+
+  function getAuthSuccessUrl() {
+    const host = getHostWindow();
+    const url = new URL(host.location?.href || window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('oauth', '1');
+    return url.toString();
+  }
+
+  function getAuthFailureUrl() {
+    const host = getHostWindow();
+    const url = new URL(host.location?.href || window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('auth_error', '1');
+    return url.toString();
+  }
+
+  function clearHostAuthParams() {
+    try {
+      const host = getHostWindow();
+      const url = new URL(host.location.href);
+      url.searchParams.delete('oauth');
+      url.searchParams.delete('auth_error');
+      url.searchParams.delete('userId');
+      url.searchParams.delete('secret');
+      host.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // ignore
+    }
   }
 
   function clamp(value, min, max) {
@@ -921,6 +1002,185 @@
     renderRadioRow();
   }
 
+  function renderPlaybackCollections() {
+    renderQueue();
+    renderQuickRow();
+    renderTrackList('track-list', 'homeTracks', 'Loading tracks from Monochrome...');
+    renderTrackList('discover-tracks', 'discoverTracks', 'Search for tracks, albums, or artists.');
+    renderTrackList('library-tracks', 'libraryTracks', 'Your liked tracks and recent plays will land here.');
+    renderTrackList('radio-tracks', 'radioTracks', 'Recommendations will appear after you pick a track.');
+    renderRadioRow();
+  }
+
+  function getUserLabel(user) {
+    if (!user) return 'Guest';
+    return user.name || user.email || 'Connected';
+  }
+
+  function getUserInitials(user) {
+    const raw = getUserLabel(user)
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('');
+    return raw || 'PP';
+  }
+
+  function updateAuthUI() {
+    const { user, loading, error } = state.auth;
+    if (dom.authAvatar) dom.authAvatar.textContent = getUserInitials(user);
+    if (dom.authLabel) dom.authLabel.textContent = getUserLabel(user);
+    if (dom.authSub) dom.authSub.textContent = loading ? 'Checking session…' : user ? 'Connected' : 'Connect';
+    if (dom.authStatusCopy) {
+      dom.authStatusCopy.textContent = error
+        ? error
+        : user
+          ? `Signed in as ${user.email || user.name || 'your Monochrome account'}.`
+          : 'Sign in with the Monochrome account flow. OAuth only works on Appwrite-authorized domains.';
+    }
+    if (dom.authConfigNote) {
+      dom.authConfigNote.textContent = `Endpoint: ${getAuthEndpoint()} · Project: ${getAuthProject()}`;
+    }
+    if (dom.authSignOutBtn) {
+      dom.authSignOutBtn.style.display = user ? 'inline-flex' : 'none';
+    }
+  }
+
+  async function ensureAuthAccount() {
+    if (state.auth.account) return state.auth.account;
+    const { Client, Account } = await import('https://cdn.jsdelivr.net/npm/appwrite@17.0.2/+esm');
+    const client = new Client().setEndpoint(getAuthEndpoint()).setProject(getAuthProject());
+    state.auth.account = new Account(client);
+    return state.auth.account;
+  }
+
+  function openAuthModal() {
+    if (!dom.authModal) return;
+    dom.authModal.classList.add('open');
+    dom.authModal.setAttribute('aria-hidden', 'false');
+    updateAuthUI();
+  }
+
+  function closeAuthModal() {
+    if (!dom.authModal) return;
+    dom.authModal.classList.remove('open');
+    dom.authModal.setAttribute('aria-hidden', 'true');
+  }
+
+  async function hydrateAuthState() {
+    state.auth.loading = true;
+    state.auth.error = '';
+    updateAuthUI();
+
+    try {
+      const account = await ensureAuthAccount();
+      const host = getHostWindow();
+      const params = new URLSearchParams(host.location?.search || '');
+      const userId = params.get('userId');
+      const secret = params.get('secret');
+      const isOAuthRedirect = params.get('oauth') === '1';
+
+      if (userId && secret && typeof account.createSession === 'function') {
+        try {
+          await account.createSession(userId, secret);
+        } catch (error) {
+          console.warn('Auth handoff failed', error);
+        }
+      } else if (isOAuthRedirect) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      state.auth.user = await account.get();
+    } catch (error) {
+      state.auth.user = null;
+      const message = error?.message || '';
+      state.auth.error = message && /project|origin|domain|redirect|general_origin_not_allowed/i.test(message)
+        ? 'Auth is configured, but this domain is not yet allowed in Appwrite.'
+        : '';
+    } finally {
+      state.auth.loading = false;
+      state.auth.ready = true;
+      clearHostAuthParams();
+      updateAuthUI();
+    }
+  }
+
+  async function authWithProvider(provider) {
+    try {
+      state.auth.error = '';
+      updateAuthUI();
+      const account = await ensureAuthAccount();
+      account.createOAuth2Session(provider, getAuthSuccessUrl(), getAuthFailureUrl());
+    } catch (error) {
+      state.auth.error = error?.message || 'Unable to start OAuth right now.';
+      updateAuthUI();
+    }
+  }
+
+  async function authWithEmail(mode) {
+    const email = dom.authEmail?.value.trim() || '';
+    const password = dom.authPassword?.value || '';
+    if (!email || !password) {
+      state.auth.error = 'Enter both email and password.';
+      updateAuthUI();
+      return;
+    }
+
+    state.auth.loading = true;
+    state.auth.error = '';
+    updateAuthUI();
+
+    try {
+      const account = await ensureAuthAccount();
+      if (mode === 'signup') {
+        await account.create('unique()', email, password);
+      }
+      await account.createEmailPasswordSession(email, password);
+      state.auth.user = await account.get();
+      if (dom.authPassword) dom.authPassword.value = '';
+      closeAuthModal();
+    } catch (error) {
+      state.auth.error = error?.message || 'Auth request failed.';
+    } finally {
+      state.auth.loading = false;
+      updateAuthUI();
+    }
+  }
+
+  async function authResetPassword() {
+    const email = dom.authEmail?.value.trim() || '';
+    if (!email) {
+      state.auth.error = 'Enter your email address first.';
+      updateAuthUI();
+      return;
+    }
+
+    try {
+      const account = await ensureAuthAccount();
+      await account.createRecovery(email, getAuthSuccessUrl());
+      state.auth.error = `Password reset email sent to ${email}.`;
+      updateAuthUI();
+    } catch (error) {
+      state.auth.error = error?.message || 'Could not send reset email.';
+      updateAuthUI();
+    }
+  }
+
+  async function authSignOut() {
+    try {
+      const account = await ensureAuthAccount();
+      await account.deleteSession('current');
+      state.auth.user = null;
+      state.auth.error = '';
+      closeAuthModal();
+      updateAuthUI();
+    } catch (error) {
+      state.auth.error = error?.message || 'Sign out failed.';
+      updateAuthUI();
+    }
+  }
+
   function applyCurrentTrackToSurface() {
     const track = getCurrentTrack();
     if (!track) return;
@@ -1555,13 +1815,13 @@
     audio.addEventListener('play', () => {
       state.isPlaying = true;
       updatePlayPauseIcons();
-      renderCollections();
+      renderPlaybackCollections();
     });
 
     audio.addEventListener('pause', () => {
       state.isPlaying = false;
       updatePlayPauseIcons();
-      renderCollections();
+      renderPlaybackCollections();
     });
 
     audio.addEventListener('loadedmetadata', () => {
@@ -1598,9 +1858,22 @@
       }
     });
 
+    dom.authTrigger?.addEventListener('click', openAuthModal);
+    dom.authTrigger?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openAuthModal();
+      }
+    });
+
     document.addEventListener('keydown', (event) => {
       const tag = document.activeElement?.tagName || '';
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA';
+
+      if (event.key === 'Escape' && dom.authModal?.classList.contains('open')) {
+        closeAuthModal();
+        return;
+      }
 
       if (event.key === 'Escape' && state.isExpandedPlayerOpen) {
         closeExpandedPlayer();
@@ -1643,8 +1916,8 @@
 
   async function init() {
     document.title = 'Pulse Prism';
-    const avatar = document.querySelector('.avatar');
-    if (avatar) avatar.textContent = 'PP';
+    updateAuthUI();
+    void hydrateAuthState();
 
     updateShuffleUI();
     updateRepeatUI();
@@ -1709,6 +1982,20 @@
   window.toggleLikeCurrent = toggleLikeCurrent;
   window.openExpandedPlayer = openExpandedPlayer;
   window.closeExpandedPlayer = closeExpandedPlayer;
+  window.openAuthModal = openAuthModal;
+  window.closeAuthModal = closeAuthModal;
+  window.authWithProvider = (provider) => {
+    void authWithProvider(provider);
+  };
+  window.authWithEmail = (mode) => {
+    void authWithEmail(mode);
+  };
+  window.authResetPassword = () => {
+    void authResetPassword();
+  };
+  window.authSignOut = () => {
+    void authSignOut();
+  };
   window.setPage = setPage;
   window.runDiscoveryCard = runDiscoveryCard;
 
