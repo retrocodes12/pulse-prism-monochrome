@@ -5,9 +5,13 @@
     lastTrack: 'pulse-prism-last-track-id',
     volume: 'pulse-prism-volume',
     muted: 'pulse-prism-muted',
+    tidalToken: 'pulse-prism-tidal-app-token',
+    tidalTokenExpiry: 'pulse-prism-tidal-app-token-expiry',
   };
 
   const EDITORS_PICKS_URL = 'https://monochrome.tf/editors-picks.json';
+  const TIDAL_BROWSER_CLIENT_ID = 'txNoH4kkV41MfH25';
+  const TIDAL_BROWSER_CLIENT_SECRET = 'dQjy0MinCEvxi1O4UmxvxWnDjt4cgHBPw8ll6nYBk98=';
   const API_INSTANCES = [
     'https://eu-central.monochrome.tf',
     'https://us-west.monochrome.tf',
@@ -158,6 +162,14 @@
     localStorage.setItem(STORAGE_KEYS.muted, String(state.isMuted));
   }
 
+  function loadStoredString(key) {
+    try {
+      return localStorage.getItem(key) || '';
+    } catch {
+      return '';
+    }
+  }
+
   function getHostWindow() {
     try {
       return window.parent && window.parent !== window ? window.parent : window;
@@ -206,6 +218,73 @@
     url.hash = '';
     url.searchParams.set('auth_error', '1');
     return url.toString();
+  }
+
+  function getPreferredManifestType() {
+    return /iPad|iPhone|iPod|Safari/.test(navigator.userAgent) ? 'HLS' : 'MPEG_DASH';
+  }
+
+  function canPlayAtmos() {
+    try {
+      if (window.MediaSource && typeof window.MediaSource.isTypeSupported === 'function') {
+        if (
+          window.MediaSource.isTypeSupported('audio/mp4; codecs="ec-3"') ||
+          window.MediaSource.isTypeSupported('audio/mp4; codecs="eac3"')
+        ) {
+          return true;
+        }
+      }
+      const audioProbe = document.createElement('audio');
+      return Boolean(
+        audioProbe.canPlayType('audio/mp4; codecs="ec-3"') ||
+        audioProbe.canPlayType('audio/mp4; codecs="eac3"'),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function getPreferredFormats() {
+    const formats = ['HEAACV1', 'AACLC', 'FLAC', 'FLAC_HIRES'];
+    if (canPlayAtmos()) {
+      formats.push('EAC3_JOC');
+    }
+    return formats;
+  }
+
+  async function fetchTidalAppToken(force = false) {
+    const cachedToken = loadStoredString(STORAGE_KEYS.tidalToken);
+    const cachedExpiry = Number(loadStoredString(STORAGE_KEYS.tidalTokenExpiry));
+    if (!force && cachedToken && Number.isFinite(cachedExpiry) && Date.now() < cachedExpiry) {
+      return cachedToken;
+    }
+
+    const params = new URLSearchParams({
+      client_id: TIDAL_BROWSER_CLIENT_ID,
+      client_secret: TIDAL_BROWSER_CLIENT_SECRET,
+      grant_type: 'client_credentials',
+    });
+
+    const response = await fetch('https://auth.tidal.com/v1/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${btoa(`${TIDAL_BROWSER_CLIENT_ID}:${TIDAL_BROWSER_CLIENT_SECRET}`)}`,
+      },
+      body: params,
+    });
+
+    if (!response.ok) {
+      throw new Error(`TIDAL auth failed: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const token = payload.access_token;
+    const expiresIn = Number(payload.expires_in || 3600);
+    const expiry = Date.now() + Math.max(expiresIn - 60, 60) * 1000;
+    localStorage.setItem(STORAGE_KEYS.tidalToken, token);
+    localStorage.setItem(STORAGE_KEYS.tidalTokenExpiry, String(expiry));
+    return token;
   }
 
   function clearHostAuthParams() {
@@ -1232,6 +1311,40 @@
   async function fetchManifest(track) {
     if (state.manifestCache.has(track.id)) {
       return state.manifestCache.get(track.id);
+    }
+
+    try {
+      const token = await fetchTidalAppToken();
+      const params = new URLSearchParams({
+        adaptive: 'true',
+        manifestType: getPreferredManifestType(),
+        uriScheme: 'HTTPS',
+        usage: 'PLAYBACK',
+      });
+      getPreferredFormats().forEach((format) => params.append('formats', format));
+
+      const directResponse = await fetch(`https://openapi.tidal.com/v2/trackManifests/${track.id}?${params.toString()}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      if (directResponse.ok) {
+        const payload = await directResponse.json();
+        const attributes = payload?.data?.attributes;
+        if (attributes?.uri) {
+          const directManifest = {
+            url: attributes.uri,
+            presentation: attributes.trackPresentation || '',
+            previewReason: attributes.previewReason || '',
+          };
+          state.manifestCache.set(track.id, directManifest);
+          return directManifest;
+        }
+      } else if (directResponse.status === 401) {
+        localStorage.removeItem(STORAGE_KEYS.tidalToken);
+        localStorage.removeItem(STORAGE_KEYS.tidalTokenExpiry);
+      }
+    } catch (error) {
+      console.warn('Direct TIDAL manifest lookup failed, falling back to public bridge', error);
     }
 
     const params = new URLSearchParams();
