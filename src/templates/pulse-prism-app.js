@@ -295,6 +295,93 @@
     return token;
   }
 
+  function extractStreamUrlFromManifest(manifest) {
+    if (!manifest) return null;
+
+    try {
+      let decoded;
+      if (typeof manifest === 'string') {
+        try {
+          decoded = atob(manifest);
+        } catch {
+          decoded = manifest;
+        }
+      } else if (typeof manifest === 'object') {
+        if (manifest.urls && Array.isArray(manifest.urls)) {
+          return manifest.urls[0] || null;
+        }
+        return null;
+      } else {
+        return null;
+      }
+
+      if (decoded.includes('<MPD')) {
+        const blob = new Blob([decoded], { type: 'application/dash+xml' });
+        return URL.createObjectURL(blob);
+      }
+
+      try {
+        const parsed = JSON.parse(decoded);
+        if (parsed?.urls?.[0]) {
+          return parsed.urls[0];
+        }
+      } catch {
+        const match = decoded.match(/https?:\/\/[\w\-.~:?#[@!$&'()*+,;=%/]+/);
+        return match ? match[0] : null;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Failed to decode manifest', error);
+      return null;
+    }
+  }
+
+  function parseTrackLookup(data) {
+    const entries = Array.isArray(data) ? data : [data];
+    let track;
+    let info;
+    let originalTrackUrl;
+
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+
+      if (!track && 'duration' in entry) {
+        track = entry;
+        continue;
+      }
+
+      if (!info && 'manifest' in entry) {
+        info = entry;
+        continue;
+      }
+
+      if (!originalTrackUrl && typeof entry.OriginalTrackUrl === 'string') {
+        originalTrackUrl = entry.OriginalTrackUrl;
+      }
+    }
+
+    if (!track || !info) {
+      throw new Error('Malformed track response');
+    }
+
+    return { track, info, originalTrackUrl };
+  }
+
+  function normalizeTrackResponse(apiResponse) {
+    if (!apiResponse || typeof apiResponse !== 'object') {
+      return apiResponse;
+    }
+
+    const raw = apiResponse.data ?? apiResponse;
+    const trackStub = {
+      duration: raw.duration ?? 0,
+      id: raw.trackId ?? raw.id ?? null,
+    };
+
+    return [trackStub, raw];
+  }
+
   function clearHostAuthParams() {
     try {
       const host = getHostWindow();
@@ -455,6 +542,14 @@
     return 'TIDAL stream';
   }
 
+  function formatPreviewReason(value) {
+    if (!value) return '';
+    return String(value)
+      .toLowerCase()
+      .replaceAll('_', ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
   function buildMood(track) {
     const bpm = Number(track.bpm || 0);
     if (bpm >= 126) return 'Night Run';
@@ -484,6 +579,7 @@
   function buildNotes(track) {
     const sentences = [
       `${formatPresentation(track)} through Monochrome's public bridge.`,
+      track.previewReason ? `${formatPreviewReason(track.previewReason)}.` : '',
       track.releaseYear ? `Released ${track.releaseYear}.` : '',
       track.copyright ? `${track.copyright.replace(/\s+/g, ' ')}.` : '',
     ].filter(Boolean);
@@ -1358,6 +1454,23 @@
       }
     } catch (error) {
       console.warn('Direct TIDAL manifest lookup failed, falling back to public bridge', error);
+    }
+
+    try {
+      const trackLookupPayload = await fetchApi(`/track/?id=${encodeURIComponent(track.id)}&quality=HI_RES_LOSSLESS`);
+      const lookup = parseTrackLookup(normalizeTrackResponse(trackLookupPayload));
+      const directUrl = lookup.originalTrackUrl || extractStreamUrlFromManifest(lookup.info?.manifest);
+      if (directUrl) {
+        const fallbackManifest = {
+          url: directUrl,
+          presentation: lookup.info?.assetPresentation || lookup.info?.trackPresentation || '',
+          previewReason: lookup.info?.previewReason || '',
+        };
+        state.manifestCache.set(track.id, fallbackManifest);
+        return fallbackManifest;
+      }
+    } catch (error) {
+      console.warn('Track lookup fallback failed, trying public preview bridge', error);
     }
 
     const params = new URLSearchParams();
