@@ -204,20 +204,28 @@
 
   function getAuthSuccessUrl() {
     const host = getHostWindow();
-    const url = new URL(host.location?.href || window.location.href);
-    url.search = '';
-    url.hash = '';
-    url.searchParams.set('oauth', '1');
-    return url.toString();
+    const returnUrl = new URL(host.location?.href || window.location.href);
+    returnUrl.search = '';
+    returnUrl.hash = '';
+    returnUrl.searchParams.set('oauth', '1');
+
+    const bridge = new URL('https://monochrome.tf/pulse-prism-auth-bridge.html');
+    bridge.searchParams.set('return_to', returnUrl.toString());
+    bridge.searchParams.set('oauth', '1');
+    return bridge.toString();
   }
 
   function getAuthFailureUrl() {
     const host = getHostWindow();
-    const url = new URL(host.location?.href || window.location.href);
-    url.search = '';
-    url.hash = '';
-    url.searchParams.set('auth_error', '1');
-    return url.toString();
+    const returnUrl = new URL(host.location?.href || window.location.href);
+    returnUrl.search = '';
+    returnUrl.hash = '';
+    returnUrl.searchParams.set('auth_error', '1');
+
+    const bridge = new URL('https://monochrome.tf/pulse-prism-auth-bridge.html');
+    bridge.searchParams.set('return_to', returnUrl.toString());
+    bridge.searchParams.set('auth_error', '1');
+    return bridge.toString();
   }
 
   function getPreferredManifestType() {
