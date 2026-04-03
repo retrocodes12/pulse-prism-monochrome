@@ -2,6 +2,10 @@
 
 Pulse Prism is a modern music player frontend built with React, Vite, and a standalone glassmorphism player surface. The UI stays in a single HTML template while the runtime injects a Monochrome-backed data and playback layer for search, albums, queueing, recommendations, and preview playback.
 
+## Live demo
+
+GitHub Pages: https://retrocodes12.github.io/pulse-prism-monochrome/
+
 ## What is wired right now
 
 - Real discovery data from Monochrome editor picks
@@ -51,3 +55,5 @@ That writes a single file to `dist-share/index.html`.
 ## Deployment
 
 GitHub Pages deploys from the share build in `dist-share/` through `.github/workflows/deploy-pages.yml`.
+
+Current deployment URL: https://retrocodes12.github.io/pulse-prism-monochrome/
