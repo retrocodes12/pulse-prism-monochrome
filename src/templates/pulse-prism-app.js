@@ -75,6 +75,8 @@
     radioToken: 0,
     loadToken: 0,
     searchTimer: null,
+    playbackFrame: 0,
+    lyricNodes: [],
     discoverContext: {
       gridTitle: 'Editor picks',
       gridLink: 'Featured albums',
@@ -769,6 +771,7 @@
       `)
       .join('');
 
+    state.lyricNodes = [...root.querySelectorAll('.lyric-line')];
     state.activeLyricIdx = -1;
     syncLyricState(true);
   }
@@ -864,6 +867,7 @@
   function syncLyricState(forceScroll = false) {
     const track = getCurrentTrack();
     if (!track || !track.playbackGuide?.length) return;
+    if (!state.isExpandedPlayerOpen && !forceScroll) return;
 
     const lines = track.playbackGuide;
     let activeIndex = -1;
@@ -880,7 +884,8 @@
     if (activeIndex === state.activeLyricIdx && !forceScroll) return;
     state.activeLyricIdx = activeIndex;
 
-    const lyricNodes = document.querySelectorAll('.lyric-line');
+    const lyricNodes = state.lyricNodes;
+    if (!lyricNodes.length) return;
     lyricNodes.forEach((node, index) => {
       node.classList.toggle('past', activeIndex > -1 && index < activeIndex);
       node.classList.toggle('active', index === activeIndex);
@@ -892,6 +897,17 @@
         activeNode.scrollIntoView({ block: 'center', behavior: forceScroll ? 'auto' : 'smooth' });
       }
     }
+  }
+
+  function flushPlaybackFrame() {
+    state.playbackFrame = 0;
+    updateProgressUI();
+    syncLyricState();
+  }
+
+  function schedulePlaybackFrame() {
+    if (state.playbackFrame) return;
+    state.playbackFrame = requestAnimationFrame(flushPlaybackFrame);
   }
 
   function renderCollections() {
@@ -930,14 +946,14 @@
     state.shakaPlayer = new window.shaka.Player(audio);
     state.shakaPlayer.configure({
       streaming: {
-        bufferingGoal: 20,
-        rebufferingGoal: 2,
-        bufferBehind: 20,
+        bufferingGoal: 35,
+        rebufferingGoal: 4,
+        bufferBehind: 30,
       },
       abr: {
         enabled: true,
-        defaultBandwidthEstimate: 160000,
-        switchInterval: 1.5,
+        defaultBandwidthEstimate: 320000,
+        switchInterval: 3,
       },
     });
 
@@ -1203,6 +1219,7 @@
     panel.setAttribute('aria-hidden', 'false');
     document.body.classList.add('player-open');
     state.isExpandedPlayerOpen = true;
+    syncLyricState(true);
 
     if (section === 'queue') {
       requestAnimationFrame(() => {
@@ -1554,8 +1571,7 @@
     });
 
     audio.addEventListener('timeupdate', () => {
-      updateProgressUI();
-      syncLyricState();
+      schedulePlaybackFrame();
     });
 
     audio.addEventListener('ended', async () => {
